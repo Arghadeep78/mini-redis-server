@@ -138,5 +138,3 @@ Run the full test suite against a live server instance:
 ```bash
 ./test_all.sh
 ```
-
-Detailed command use cases and expected outputs are documented in [Concepts,UseCases&Tests.md](Concepts,UseCases&Tests.md).

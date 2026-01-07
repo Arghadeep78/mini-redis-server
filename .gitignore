@@ -3,3 +3,5 @@ my_redis_server
 dump.my_rdb
 build
 Theory.md
+FIXED_BUGS.md
+concepts.md

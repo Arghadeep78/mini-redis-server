@@ -48,6 +48,8 @@ std::vector<std::string> parseRespCommand(const std::string &input) {
     } catch (const std::exception&) {
         return tokens;  // malformed element count
     }
+    if (numElements <= 0 || numElements > 1024)
+        return tokens; // reject zero, negative, or absurdly large element counts
     pos = crlf + 2; // step past the "\r\n"
 
     // Read each element. Format per element: "$<len>\r\n<bytes>\r\n".
@@ -300,11 +302,12 @@ static std::string handleLset(const std::vector<std::string>& tokens, RedisDatab
 // A hash is a key whose value is itself a map of field -> value pairs.
 
 // HSET <key> <field> <value> -> set a single field in the hash.
+// Returns 1 if the field was newly created, 0 if it was updated.
 static std::string handleHset(const std::vector<std::string>& tokens, RedisDatabase& db) {
     if (tokens.size() < 4)
         return "-Error: HSET requires key, field and value\r\n";
-    db.hset(tokens[1], tokens[2], tokens[3]);
-    return ":1\r\n";
+    bool isNew = db.hset(tokens[1], tokens[2], tokens[3]);
+    return ":" + std::to_string(isNew ? 1 : 0) + "\r\n";
 }
 
 // HGET <key> <field> -> return one field's value, or nil if the field/key is absent.

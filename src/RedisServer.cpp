@@ -6,7 +6,6 @@
 #include <sys/socket.h>
 #include <unistd.h>
 #include <netinet/in.h>
-#include <vector>
 #include <thread>
 #include <cstring>
 #include <signal.h>
@@ -90,7 +89,6 @@ void RedisServer::run() {
 
     std::cout << "Redis Server Listening On Port " << port << "\n";
 
-    std::vector<std::thread> threads;   // One worker thread per connected client
     RedisCommandHandler cmdHandler;     // Shared, stateless command parser/dispatcher
 
     // Accept loop: block on accept(), then hand each client off to its own thread.
@@ -104,10 +102,10 @@ void RedisServer::run() {
             break;
         }
 
-        // Serve this client on a dedicated thread so slow clients don't block
-        // others. The thread reads requests, processes them, and writes replies
-        // until the client disconnects.
-        threads.emplace_back([client_socket, &cmdHandler](){
+        // Serve this client on a dedicated detached thread so slow clients don't
+        // block others. Detaching avoids accumulating finished threads in a vector
+        // that is never pruned, which would otherwise grow without bound.
+        std::thread([client_socket, &cmdHandler](){
             char buffer[1024];
             while (true) {
                 memset(buffer, 0, sizeof(buffer));
@@ -123,12 +121,7 @@ void RedisServer::run() {
                 }
             }
             close(client_socket);
-        });
-    }
-
-    // Once the loop ends, wait for all client threads to finish cleanly.
-    for (auto& t : threads) {
-        if (t.joinable()) t.join();
+        }).detach();
     }
 
     // Final safety save on the way out (in case we exited the loop without

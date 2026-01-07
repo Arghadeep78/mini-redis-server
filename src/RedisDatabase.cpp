@@ -20,21 +20,24 @@ RedisDatabase& RedisDatabase::getInstance() {
 
 // Common Comands
 
-// Remove every key from all three stores (string, list, hash).
+// Remove every key from all three stores (string, list, hash) and all TTLs.
 bool RedisDatabase::flushAll() {
     std::lock_guard<std::mutex> lock(db_mutex);
     kv_store.clear();
     list_store.clear();
     hash_store.clear();
+    expiry_map.clear(); // orphaned TTL entries must not survive a flush
     return true;
 }
 
 // Key/Value Operations
 
 // Store (or overwrite) a string value for the given key.
+// Clears any prior TTL so a SET never inherits an old expiration.
 void RedisDatabase::set(const std::string& key, const std::string& value) {
     std::lock_guard<std::mutex> lock(db_mutex);
     kv_store[key] = value;
+    expiry_map.erase(key); // a fresh SET resets any previous TTL
 }
 
 // Look up a string value. Returns true and fills `value` if found; false otherwise.
@@ -79,7 +82,7 @@ std::string RedisDatabase::type(const std::string& key) {
     else return "none";
 }
 
-// Delete a key from whichever store(s) hold it.
+// Delete a key from whichever store(s) hold it and remove any TTL entry.
 bool RedisDatabase::del(const std::string& key) {
     std::lock_guard<std::mutex> lock(db_mutex);
     purgeExpired();
@@ -87,6 +90,7 @@ bool RedisDatabase::del(const std::string& key) {
     erased |= kv_store.erase(key) > 0;   // erase() returns count removed (0 or 1)
     erased |= list_store.erase(key) > 0;
     erased |= hash_store.erase(key) > 0;
+    expiry_map.erase(key); // always clean up TTL so re-created keys don't inherit it
     return erased;
 }
 
@@ -131,6 +135,17 @@ void RedisDatabase::purgeExpired() {
 bool RedisDatabase::rename(const std::string& oldKey, const std::string& newKey) {
     std::lock_guard<std::mutex> lock(db_mutex);
     purgeExpired();
+    if (oldKey == newKey) {
+        // Self-rename: the key must exist; nothing else to do.
+        return (kv_store.count(oldKey) || list_store.count(oldKey) || hash_store.count(oldKey));
+    }
+    // Overwrite the destination: erase newKey from every store so a key of a
+    // different type can't survive alongside the renamed key.
+    kv_store.erase(newKey);
+    list_store.erase(newKey);
+    hash_store.erase(newKey);
+    expiry_map.erase(newKey);
+
     bool found = false;
 
     // Check each store in turn: if the old key is present there, copy its
@@ -188,16 +203,20 @@ ssize_t RedisDatabase::llen(const std::string& key) {
 }
 
 // Prepend a value to the front (head/left) of the list, creating it if needed.
+// Clears any prior TTL when creating a brand-new list key.
 void RedisDatabase::lpush(const std::string& key, const std::string& value) {
     std::lock_guard<std::mutex> lock(db_mutex);
-    // operator[] default-constructs an empty list on first push; insert at
-    // begin() puts the new value at the head.
+    if (list_store.find(key) == list_store.end())
+        expiry_map.erase(key); // new list key must not inherit a stale TTL
     list_store[key].insert(list_store[key].begin(), value);
 }
 
 // Append a value to the back (tail/right) of the list, creating it if needed.
+// Clears any prior TTL when creating a brand-new list key.
 void RedisDatabase::rpush(const std::string& key, const std::string& value) {
     std::lock_guard<std::mutex> lock(db_mutex);
+    if (list_store.find(key) == list_store.end())
+        expiry_map.erase(key); // new list key must not inherit a stale TTL
     list_store[key].push_back(value);
 }
 
@@ -314,10 +333,15 @@ bool RedisDatabase::lset(const std::string& key, int index, const std::string& v
 // Hash Operations
 
 // Set field -> value inside the hash at `key`, creating the hash if needed.
+// Returns true if the field is new, false if it was updated.
+// Clears any prior TTL when creating a brand-new hash key.
 bool RedisDatabase::hset(const std::string& key, const std::string& field, const std::string& value) {
     std::lock_guard<std::mutex> lock(db_mutex);
+    if (hash_store.find(key) == hash_store.end())
+        expiry_map.erase(key); // new hash key must not inherit a stale TTL
+    bool isNew = (hash_store[key].find(field) == hash_store[key].end());
     hash_store[key][field] = value;
-    return true;
+    return isNew;
 }
 
 // Read one field's value into `value`. Returns false if the key or field is absent.
