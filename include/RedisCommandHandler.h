@@ -8,7 +8,7 @@
 // text), dispatches to the matching command, and produces a RESP-encoded
 // response string to send back to the client.
 class RedisCommandHandler {
-public:
+  public:
     RedisCommandHandler();
 
     // Parse one client request and execute it against the shared database.

@@ -5,6 +5,8 @@
 #include <sstream>
 #include <algorithm>
 #include <exception>
+#include <functional>
+#include <unordered_map>
 #include <iostream> // debug
 
 // RESP parser:
@@ -18,11 +20,12 @@
 // (e.g. {"SET", "name", "Alice"}). It accepts two formats:
 //   1. RESP arrays (what real redis-cli sends), starting with '*'.
 //   2. Plain whitespace-separated text (handy for telnet/manual testing).
-std::vector<std::string> parseRespCommand(const std::string &input) {
+std::vector<std::string> parseRespCommand(const std::string& input) {
     std::vector<std::string> tokens;
-    if (input.empty()) return tokens;
+    if (input.empty())
+        return tokens;
 
-    // If it doesnt strart with '*', fallback to splitting by whitespace.
+    // If it doesn't start with '*', fall back to splitting by whitespace.
     if (input[0] != '*') {
         std::istringstream iss(input);
         std::string token;
@@ -33,42 +36,47 @@ std::vector<std::string> parseRespCommand(const std::string &input) {
 
     size_t pos = 0; // current read position within the input buffer
     // Expect '*' followed by number of elements
-    if (input[pos] != '*') return tokens;
+    if (input[pos] != '*')
+        return tokens;
     pos++; // skip '*'
 
     // crlf = Carriage Return (\r), Line Feed (\n)
     // RESP separates every field with "\r\n"; find the end of the count field.
     size_t crlf = input.find("\r\n", pos);
-    if (crlf == std::string::npos) return tokens;
+    if (crlf == std::string::npos)
+        return tokens;
 
     // Read how many bulk-string elements make up this command array.
     int numElements = 0;
     try {
         numElements = std::stoi(input.substr(pos, crlf - pos));
     } catch (const std::exception&) {
-        return tokens;  // malformed element count
+        return tokens; // malformed element count
     }
     if (numElements <= 0 || numElements > 1024)
         return tokens; // reject zero, negative, or absurdly large element counts
-    pos = crlf + 2; // step past the "\r\n"
+    pos = crlf + 2;    // step past the "\r\n"
 
     // Read each element. Format per element: "$<len>\r\n<bytes>\r\n".
     for (int i = 0; i < numElements; i++) {
-        if (pos >= input.size() || input[pos] != '$') break; // format error
-        pos++; // skip '$'
+        if (pos >= input.size() || input[pos] != '$')
+            break; // format error
+        pos++;     // skip '$'
 
         // Parse the declared byte-length of this element.
         crlf = input.find("\r\n", pos);
-        if (crlf == std::string::npos) break;
+        if (crlf == std::string::npos)
+            break;
         int len = 0;
         try {
             len = std::stoi(input.substr(pos, crlf - pos));
         } catch (const std::exception&) {
-            break;  // malformed length
+            break; // malformed length
         }
         pos = crlf + 2;
 
-        if (len < 0 || pos + static_cast<size_t>(len) > input.size()) break; // negative length or declared length runs past the buffer
+        if (len < 0 || pos + static_cast<size_t>(len) > input.size())
+            break; // negative length or declared length runs past the buffer
         std::string token = input.substr(pos, len);
         tokens.push_back(token);
         pos += len + 2; // skip token and CRLF
@@ -194,8 +202,7 @@ static std::string handleLget(const std::vector<std::string>& tokens, RedisDatab
     std::ostringstream oss;
     oss << "*" << elems.size() << "\r\n";
     for (const auto& e : elems) {
-        oss << "$" << e.size() << "\r\n"
-            << e << "\r\n";
+        oss << "$" << e.size() << "\r\n" << e << "\r\n";
     }
     return oss.str();
 }
@@ -272,9 +279,9 @@ static std::string handleLindex(const std::vector<std::string>& tokens, RedisDat
     try {
         int index = std::stoi(tokens[2]);
         std::string value;
-        if (db.lindex(tokens[1], index, value)) 
+        if (db.lindex(tokens[1], index, value))
             return "$" + std::to_string(value.size()) + "\r\n" + value + "\r\n";
-        else 
+        else
             return "$-1\r\n";
     } catch (const std::exception&) {
         return "-Error: Invalid index\r\n";
@@ -289,7 +296,7 @@ static std::string handleLset(const std::vector<std::string>& tokens, RedisDatab
         int index = std::stoi(tokens[2]);
         if (db.lset(tokens[1], index, tokens[3]))
             return "+OK\r\n";
-        else 
+        else
             return "-Error: Index out of range\r\n";
     } catch (const std::exception&) {
         return "-Error: Invalid index\r\n";
@@ -337,13 +344,13 @@ static std::string handleHdel(const std::vector<std::string>& tokens, RedisDatab
 }
 
 // HGETALL <key> -> return a flat array alternating field, value, field, value, ...
-static std::string handleHgetall (const std::vector<std::string>& tokens, RedisDatabase& db) {
+static std::string handleHgetall(const std::vector<std::string>& tokens, RedisDatabase& db) {
     if (tokens.size() < 2)
         return "-Error: HGETALL requires key\r\n";
     auto hash = db.hgetall(tokens[1]);
     std::ostringstream oss;
     oss << "*" << hash.size() * 2 << "\r\n"; // *2 because each pair emits a field and a value
-    for (const auto& pair: hash) {
+    for (const auto& pair : hash) {
         oss << "$" << pair.first.size() << "\r\n" << pair.first << "\r\n";
         oss << "$" << pair.second.size() << "\r\n" << pair.second << "\r\n";
     }
@@ -357,7 +364,7 @@ static std::string handleHkeys(const std::vector<std::string>& tokens, RedisData
     auto keys = db.hkeys(tokens[1]);
     std::ostringstream oss;
     oss << "*" << keys.size() << "\r\n";
-    for (const auto& key: keys) {
+    for (const auto& key : keys) {
         oss << "$" << key.size() << "\r\n" << key << "\r\n";
     }
     return oss.str();
@@ -370,7 +377,7 @@ static std::string handleHvals(const std::vector<std::string>& tokens, RedisData
     auto values = db.hvals(tokens[1]);
     std::ostringstream oss;
     oss << "*" << values.size() << "\r\n";
-    for (const auto& val: values) {
+    for (const auto& val : values) {
         oss << "$" << val.size() << "\r\n" << val << "\r\n";
     }
     return oss.str();
@@ -392,20 +399,22 @@ static std::string handleHmset(const std::vector<std::string>& tokens, RedisData
         return "-Error: HMSET requires key followed by field value pairs\r\n";
     std::vector<std::pair<std::string, std::string>> fieldValues;
     for (size_t i = 2; i < tokens.size(); i += 2) {
-        fieldValues.emplace_back(tokens[i], tokens[i+1]); // (field, value)
+        fieldValues.emplace_back(tokens[i], tokens[i + 1]); // (field, value)
     }
     db.hmset(tokens[1], fieldValues);
     return "+OK\r\n";
 }
 
-RedisCommandHandler::RedisCommandHandler() {}
+RedisCommandHandler::RedisCommandHandler() {
+}
 
 // Parse one request, look up the command name, and route it to the matching
 // handler. The handler's RESP reply is returned to the caller (the client thread).
 std::string RedisCommandHandler::processCommand(const std::string& commandLine) {
     // Use RESP parser to split the request into command + arguments.
     auto tokens = parseRespCommand(commandLine);
-    if (tokens.empty()) return "-Error: Empty command\r\n";
+    if (tokens.empty())
+        return "-Error: Empty command\r\n";
 
     // The first token is the command name; uppercase it so matching is
     // case-insensitive (e.g. "set", "Set", "SET" all work).
@@ -413,68 +422,48 @@ std::string RedisCommandHandler::processCommand(const std::string& commandLine) 
     std::transform(cmd.begin(), cmd.end(), cmd.begin(), ::toupper);
     RedisDatabase& db = RedisDatabase::getInstance();
 
-    // Dispatch table: match the command name to its handler.
-    // Common Commands
-    if (cmd == "PING")
-        return handlePing(tokens, db);
-    else if (cmd == "ECHO")
-        return handleEcho(tokens, db);
-    else if (cmd == "FLUSHALL")
-        return handleFlushAll(tokens, db);
-    // Key/Value Operations
-    else if (cmd == "SET")
-        return handleSet(tokens, db);
-    else if (cmd == "GET")
-        return handleGet(tokens, db);
-    else if (cmd == "KEYS")
-        return handleKeys(tokens, db);
-    else if (cmd == "TYPE")
-        return handleType(tokens, db);
-    else if (cmd == "DEL" || cmd == "UNLINK")
-        return handleDel(tokens, db);
-    else if (cmd == "EXPIRE")
-        return handleExpire(tokens, db);
-    else if (cmd == "RENAME")
-        return handleRename(tokens, db);
-    // List Operations
-    else if (cmd == "LGET") 
-        return handleLget(tokens, db);
-    else if (cmd == "LLEN") 
-        return handleLlen(tokens, db);
-    else if (cmd == "LPUSH")
-        return handleLpush(tokens, db);
-    else if (cmd == "RPUSH")
-        return handleRpush(tokens, db);
-    else if (cmd == "LPOP")
-        return handleLpop(tokens, db);
-    else if (cmd == "RPOP")
-        return handleRpop(tokens, db);
-    else if (cmd == "LREM")
-        return handleLrem(tokens, db);
-    else if (cmd == "LINDEX")
-        return handleLindex(tokens, db);
-    else if (cmd == "LSET")
-        return handleLset(tokens, db);
-    // Hash Operations
-    else if (cmd == "HSET") 
-        return handleHset(tokens, db);
-    else if (cmd == "HGET") 
-        return handleHget(tokens, db);
-    else if (cmd == "HEXISTS") 
-        return handleHexists(tokens, db);
-    else if (cmd == "HDEL") 
-        return handleHdel(tokens, db);
-    else if (cmd == "HGETALL") 
-        return handleHgetall(tokens, db);
-    else if (cmd == "HKEYS") 
-        return handleHkeys(tokens, db);
-    else if (cmd == "HVALS") 
-        return handleHvals(tokens, db);
-    else if (cmd == "HLEN") 
-        return handleHlen(tokens, db);
-    else if (cmd == "HMSET")
-        return handleHmset(tokens, db);
-    else
-        // The command name didn't match anything we support.
-        return "-Error: Unknown command\r\n";
+    // Dispatch table: map each command name to its handler. Every handler shares
+    // the signature (tokens, db) -> RESP reply, so a single lookup replaces a
+    // long if/else chain. Built once on first use (static local).
+    using Handler = std::function<std::string(const std::vector<std::string>&, RedisDatabase&)>;
+    static const std::unordered_map<std::string, Handler> dispatch = {
+        // Common Commands
+        {"PING", handlePing},
+        {"ECHO", handleEcho},
+        {"FLUSHALL", handleFlushAll},
+        // Key/Value Operations
+        {"SET", handleSet},
+        {"GET", handleGet},
+        {"KEYS", handleKeys},
+        {"TYPE", handleType},
+        {"DEL", handleDel},
+        {"UNLINK", handleDel},
+        {"EXPIRE", handleExpire},
+        {"RENAME", handleRename},
+        // List Operations
+        {"LGET", handleLget},
+        {"LLEN", handleLlen},
+        {"LPUSH", handleLpush},
+        {"RPUSH", handleRpush},
+        {"LPOP", handleLpop},
+        {"RPOP", handleRpop},
+        {"LREM", handleLrem},
+        {"LINDEX", handleLindex},
+        {"LSET", handleLset},
+        // Hash Operations
+        {"HSET", handleHset},
+        {"HGET", handleHget},
+        {"HEXISTS", handleHexists},
+        {"HDEL", handleHdel},
+        {"HGETALL", handleHgetall},
+        {"HKEYS", handleHkeys},
+        {"HVALS", handleHvals},
+        {"HLEN", handleHlen},
+        {"HMSET", handleHmset},
+    };
+
+    auto it = dispatch.find(cmd);
+    if (it == dispatch.end())
+        return "-Error: Unknown command\r\n"; // no handler registered for this command
+    return it->second(tokens, db);
 }

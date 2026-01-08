@@ -8,7 +8,7 @@
 // It listens for incoming client connections and spawns a thread per client
 // to handle their commands. A single instance is created in main().
 class RedisServer {
-public:
+  public:
     // Construct the server bound to the given TCP port (not yet listening).
     RedisServer(int port);
 
@@ -21,10 +21,10 @@ public:
     // listening socket. Safe to call from a signal handler.
     void shutdown();
 
-private:
-    int port;                    // TCP port the server listens on
-    int server_socket;           // File descriptor of the listening socket (-1 if not open)
-    std::atomic<bool> running;   // Loop flag; set to false by shutdown() to stop accepting
+  private:
+    int port;                  // TCP port the server listens on
+    int server_socket;         // File descriptor of the listening socket (-1 if not open)
+    std::atomic<bool> running; // Loop flag; set to false by shutdown() to stop accepting
 
     // Register the SIGINT (Ctrl+C) handler so shutdown is graceful.
     void setupSignalHandler();

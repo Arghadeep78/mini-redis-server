@@ -35,7 +35,7 @@ int main(int argc, char* argv[]) {
     // Runs on its own detached thread so periodic saving doesn't block the
     // server. (Note: this loop never exits on its own; the final save still
     // happens in RedisServer::shutdown()/run().)
-    std::thread persistanceThread([](){
+    std::thread persistanceThread([]() {
         while (true) {
             std::this_thread::sleep_for(std::chrono::seconds(300));
             if (!RedisDatabase::getInstance().dump("dump.my_rdb"))

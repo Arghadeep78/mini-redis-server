@@ -33,7 +33,7 @@ void RedisServer::setupSignalHandler() {
 // Initialize members and wire up signal handling. The socket isn't created
 // yet (server_socket starts at -1); that happens in run().
 RedisServer::RedisServer(int port) : port(port), server_socket(-1), running(true) {
-    globalServer = this;       // Let the signal handler find this instance
+    globalServer = this; // Let the signal handler find this instance
     setupSignalHandler();
 }
 
@@ -70,8 +70,8 @@ void RedisServer::run() {
     // Describe the address to bind to: this port, on any local interface.
     sockaddr_in serverAddr{};
     serverAddr.sin_family = AF_INET;
-    serverAddr.sin_port = htons(port);          // host -> network byte order
-    serverAddr.sin_addr.s_addr = INADDR_ANY;    // accept connections on any IP
+    serverAddr.sin_port = htons(port);       // host -> network byte order
+    serverAddr.sin_addr.s_addr = INADDR_ANY; // accept connections on any IP
 
     // Attach the socket to the address/port.
     if (bind(server_socket, (struct sockaddr*)&serverAddr, sizeof(serverAddr)) < 0) {
@@ -80,8 +80,11 @@ void RedisServer::run() {
         return;
     }
 
-    // Start listening; up to 10 connections may wait in the accept backlog.
-    if (listen(server_socket, 10) < 0) {
+    // Start listening. Use the OS maximum (SOMAXCONN) for the accept backlog so
+    // a burst of simultaneous connections doesn't block in connect() while the
+    // single-threaded accept loop catches up. A small backlog (e.g. 10) caused
+    // clients to hang under concurrent load.
+    if (listen(server_socket, SOMAXCONN) < 0) {
         std::cerr << "Error Listening On Server Socket\n";
         close(server_socket);
         return;
@@ -89,7 +92,7 @@ void RedisServer::run() {
 
     std::cout << "Redis Server Listening On Port " << port << "\n";
 
-    RedisCommandHandler cmdHandler;     // Shared, stateless command parser/dispatcher
+    RedisCommandHandler cmdHandler; // Shared, stateless command parser/dispatcher
 
     // Accept loop: block on accept(), then hand each client off to its own thread.
     while (running) {
@@ -105,13 +108,14 @@ void RedisServer::run() {
         // Serve this client on a dedicated detached thread so slow clients don't
         // block others. Detaching avoids accumulating finished threads in a vector
         // that is never pruned, which would otherwise grow without bound.
-        std::thread([client_socket, &cmdHandler](){
+        std::thread([client_socket, &cmdHandler]() {
             char buffer[1024];
             while (true) {
                 memset(buffer, 0, sizeof(buffer));
                 // Read up to one buffer's worth of request bytes.
                 int bytes = recv(client_socket, buffer, sizeof(buffer) - 1, 0);
-                if (bytes <= 0) break; // 0 = client closed; <0 = error
+                if (bytes <= 0)
+                    break; // 0 = client closed; <0 = error
                 std::string request(buffer, bytes);
                 // Parse + execute the command and send the RESP reply back.
                 std::string response = cmdHandler.processCommand(request);
